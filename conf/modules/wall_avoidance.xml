@@ -1,0 +1,18 @@
+<!DOCTYPE module SYSTEM "module.dtd">
+
+<module name="wall_avoidance">
+  <doc>
+    <description>Don&apos;t hit walls</description>
+  </doc>
+  <header>
+    <file name="wall_avoidance.h"/>
+  </header>
+  <init fun="wall_avoidance_init()"/>
+  <periodic fun="wall_avoider_periodic" freq="2" start="wall_avoider_start" stop="wall_avoider_stop" autorun="TRUE"/>
+  <event fun="wall_avoidance_event"/>
+
+  <makefile>
+    <file name="wall_avoidance.c"/>
+  </makefile>
+</module>
+

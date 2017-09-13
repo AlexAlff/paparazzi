@@ -5,6 +5,7 @@
   <firmware name="rotorcraft">
     <target name="ap" board="ardrone2">
       <configure name="USE_BARO_BOARD" value="FALSE"/>
+      <configure name="PREFIX" value="/opt/arm-2012.03/bin/arm-none-linux-gnueabi"/>
     </target>
 
     <target name="nps" board="pc">
@@ -29,7 +30,8 @@
 
   <modules main_freq="512">
     <module name="bat_voltage_ardrone2"/>
-    <module name="stereocam_droplet" />
+    <module name="wall_avoidance"/>
+    <module name="sonar_adc"/>
   </modules>
 
   <commands>
