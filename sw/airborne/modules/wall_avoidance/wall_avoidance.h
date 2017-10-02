@@ -15,12 +15,15 @@
 
 //extern void air_data_init(void);
 
-extern void wall_avoidance_init();
-extern void wall_avoider_start();
-extern void wall_avoider_stop();
-extern void wall_avoider_periodic();
-extern void wall_avoidance_event();
+extern void wall_avoidance_init(void);
+extern void wall_avoider_start(void);
+extern void wall_avoider_stop(void);
+extern void wall_avoider_periodic(void);
+extern void wall_avoidance_event(void);
 //extern void wall_avoidance_datalink_callback();
+
+
+extern float laser1;
 
 #endif
 
