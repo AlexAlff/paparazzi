@@ -29,9 +29,8 @@
   </firmware>
 
   <modules main_freq="512">
-    <module name="bat_voltage_ardrone2"/>
-    <module name="wall_avoidance"/>
-    <module name="sonar_adc"/>
+    <module name="bat_voltage_ardrone2"/>   
+	<module name="wall_avoidance"/> 
   </modules>
 
   <commands>

@@ -6,12 +6,14 @@
   </doc>
   <header>
     <file name="wall_avoidance.h"/>
+    <file name="WA_control.h"/>
   </header>
   <init fun="wall_avoidance_init()"/>
-  <periodic fun="wall_avoider_periodic()" freq="2" autorun="TRUE"/>
+  <periodic fun="wall_avoider_periodic()" freq="120" autorun="TRUE"/>
 
   <makefile>
     <file name="wall_avoidance.c"/>
+    <file name="WA_control.c"/>
   </makefile>
 </module>
 

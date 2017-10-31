@@ -112,10 +112,10 @@
 
   <section name="STABILIZATION_ATTITUDE_INDI" prefix="STABILIZATION_INDI_">
     <!-- control effectiveness -->
-    <define name="G1_P" value="0.028551973"/>
-    <define name="G1_Q" value="0.023775417"/>
-    <define name="G1_R" value="0.00173069"/>
-    <define name="G2_R" value="0.086460732"/>
+    <define name="G1_P" value="0.02"/>
+    <define name="G1_Q" value="0.02"/>
+    <define name="G1_R" value="0.0013"/>
+    <define name="G2_R" value="0.07"/>
 
     <!-- reference acceleration for attitude control -->
     <define name="REF_ERR_P" value="380.0"/>
@@ -144,7 +144,7 @@
     <!-- setpoints -->
     <define name="SP_MAX_PHI" value="45" unit="deg"/>
     <define name="SP_MAX_THETA" value="45" unit="deg"/>
-    <define name="SP_MAX_R" value="180" unit="deg/s"/>
+    <define name="SP_MAX_R" value="90" unit="deg/s"/>
     <define name="DEADBAND_A" value="0"/>
     <define name="DEADBAND_E" value="0"/>
     <define name="DEADBAND_R" value="250"/>
@@ -167,10 +167,10 @@
   </section>
 
   <section name="GUIDANCE_V" prefix="GUIDANCE_V_">
-    <define name="HOVER_KP" value="583"/>
-    <define name="HOVER_KD" value="82"/>
-    <define name="HOVER_KI" value="13"/>
-    <define name="NOMINAL_HOVER_THROTTLE" value="0.645"/>
+    <define name="HOVER_KP" value="600"/>
+    <define name="HOVER_KD" value="400"/>
+    <define name="HOVER_KI" value="0"/>
+    <define name="NOMINAL_HOVER_THROTTLE" value="0.75"/>
     <define name="ADAPT_THROTTLE_ENABLED" value="false"/>
   </section>
 
@@ -198,10 +198,10 @@
     <define name="MODE_STARTUP" value="AP_MODE_NAV"/>
     <define name="MODE_MANUAL" value="AP_MODE_ATTITUDE_DIRECT"/>
     <define name="MODE_AUTO1" value="AP_MODE_HOVER_Z_HOLD"/>
-    <define name="MODE_AUTO2" value="AP_MODE_NAV"/>
+    <define name="MODE_AUTO2" value="AP_MODE_MODULE"/>
     <define name="ARRIVED_AT_WAYPOINT" value="0.15"/>
     <define name="AUTOPILOT_IN_FLIGHT_MIN_THRUST" value="1500"/>
-    <!--   <define name="NO_RC_THRUST_LIMIT" value="TRUE"/> -->
+    <define name="NO_RC_THRUST_LIMIT" value="TRUE"/>
   </section>
 
   <section name="BAT">

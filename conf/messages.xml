@@ -1951,7 +1951,12 @@
     <field name="g2_r" type="float"/>
   </message>
 
-  <!--217 is free -->
+  <message name="CX_10_TUNING" id="217">
+    <field name="i1" type="float"/>
+    <field name="i2" type="float"/>
+  </message>
+
+
 
   <message name="BEBOP_ACTUATORS" id="218">
     <field name="cmd_thrust" type="int32"/>

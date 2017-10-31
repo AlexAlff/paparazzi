@@ -22,8 +22,8 @@ extern void wall_avoider_periodic(void);
 extern void wall_avoidance_event(void);
 //extern void wall_avoidance_datalink_callback();
 
+extern float laser_telemetry[4];
 
-extern float laser1;
+#define LASER_RANGE 4
 
 #endif
-
