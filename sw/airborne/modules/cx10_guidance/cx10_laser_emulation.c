@@ -11,11 +11,12 @@
  * sooo that's why heading is multiplied by -1 and a 90 deg offset has been introduced. I also
  * didn't know how to properly use floats at first so I split a line segment ((x1, y1), (x2, y2))
  * into (x1, y1, x2, y2) in most cases... would have been faster to pass pointers to array, could be a TO DO!
+
  */
 
 
 
-#include "modules/wall_avoidance/wall_avoidance.h"
+#include "../cx10_guidance/cx10_laser_emulation.h"
 
 #include "state.h"
 #include <stdio.h>
@@ -24,12 +25,25 @@
 #include "pprzlink/messages.h"
 #include "subsystems/datalink/downlink.h"
 
+// Wall coordinates
+#define WALL_PT_A
+#define WALL_PT_B
+#define WALL_PT_C
+#define WALL_PT_D
+
 const float OFFSET = M_PI_2; //-1.0036; // for heading, in rad, here 0 deg is east
 const float CEILING = 2; //ceiling height
 
-void wall_avoidance_init(void) {};
-void wall_avoider_start(void) {};
-void wall_avoider_stop(void) {};
+void cx10_laser_emulation_init(void) {};
+void cx10_laser_emulation_start(void) {};
+void cx10_laser_emulation_stop(void) {};
+
+void orient(float *coords, float heading, float offset, float rel_size, float position_x, float position_y);
+float distance_2_pts(float x1, float y1, float x2, float y2);
+int ccw(float x1, float y1, float x2, float y2, float x3, float y3);
+float det(float x1, float y1, float x2, float y2);
+float laser_read(float A, float B, float C, float D, float E, float F, float G, float H);
+void wall_detection(float position_x, float position_y, float *left_pt, float *forward_pt, float *right_pt, float height, float phi, float theta);
 
 // float wall_detection(float position, float left_pt, float forward_pt, float right_pt);
 
@@ -40,10 +54,15 @@ float opti_theta;
 float opti_phi;
 float opti_psi;
 
-float LEFT_WALL_CZ[] = {-4.998, 1.104, -1.053, -5.184}; // x1, y1, x2, y2
-float RIGHT_WALL_CZ[] = {1.143, 5.119, 5.264, -1.133};
-float TOP_WALL_CZ[] = {1.143, 5.119, -4.998, 1.104};
-float BOTTOM_WALL_CZ[] = {-1.053, -5.184, 5.264, -1.133};
+//float LEFT_WALL_CZ[] = {-4.998, 1.104, -1.053, -5.184}; // x1, y1, x2, y2
+//float RIGHT_WALL_CZ[] = {1.143, 5.119, 5.264, -1.133};
+//float TOP_WALL_CZ[] = {1.143, 5.119, -4.998, 1.104};
+//float BOTTOM_WALL_CZ[] = {-1.053, -5.184, 5.264, -1.133};
+
+float LEFT_WALL_CZ[] = {-5.273, 1.348, -1.289, -5.27}; // x1, y1, x2, y2
+float RIGHT_WALL_CZ[] = {1.289, 5.54, 5.52, -1.21};
+float TOP_WALL_CZ[] = {1.289, 5.54, -5.273, 1.348};
+float BOTTOM_WALL_CZ[] = {-1.289, -5.27, 5.52, -1.21};
 
 float laser_telemetry[4];
 
@@ -105,7 +124,7 @@ float laser_read(float A, float B, float C, float D, float E, float F, float G, 
 
 void wall_detection(float position_x, float position_y, float *left_pt, float *forward_pt, float *right_pt, float height, float phi, float theta)
 {
-//     Simulates laser range data, using left, right, forward lasers' points
+//     Simulates laser range data in m, using left, right, forward lasers' points
 //     Generate segments from points
 //
 //     3 lasers, 2 points per laser, 2 coordinates per point. Order: left, forward, right
@@ -122,10 +141,10 @@ void wall_detection(float position_x, float position_y, float *left_pt, float *f
 			BOTTOM_WALL_CZ[0], BOTTOM_WALL_CZ[1], BOTTOM_WALL_CZ[2], BOTTOM_WALL_CZ[3]
     };
 
-    laser_telemetry[0] = 999.;
-    laser_telemetry[1] = 999.;
-    laser_telemetry[2] = 999.;
-	laser_telemetry[3] = 999.;
+    laser_telemetry[0] = 999.; //left
+    laser_telemetry[1] = 999.; //front
+    laser_telemetry[2] = 999.; //right
+	laser_telemetry[3] = 999.; //up
 
 	// Horizontal readings
     for (int l_idx = 0; l_idx < 12; l_idx += 4)
@@ -154,17 +173,18 @@ void wall_detection(float position_x, float position_y, float *left_pt, float *f
     }
 }
 
-void wall_avoider_periodic(void)
+void cx10_laser_emulation_periodic(void)
 {
 	 float l5;
 
 	 opti_North = stateGetPositionNed_f()->x; // North
 	 opti_East = stateGetPositionNed_f()->y; // East
+	 //printf("%f,%f\n", opti_North, opti_East);
 	 opti_z =  - stateGetPositionNed_f()->z; // making up positive
 	 opti_theta = stateGetNedToBodyEulers_f()-> theta; // pitch
 	 opti_phi = stateGetNedToBodyEulers_f() -> phi; // roll
 	 opti_psi = stateGetNedToBodyEulers_f() -> psi * -1 + OFFSET; // Yaw or Heading +/- pi rad wrt East
-
+	 printf("x, y: %f, %f\n", opti_North, opti_East);
 	 float coords_left[2];
 	 float coords_forward[2];
 	 float coords_right[2];
@@ -179,10 +199,10 @@ void wall_avoider_periodic(void)
 	 // printf("left: %f, forward: %f, right: %f, top: %f\n", laser_telemetry[0], laser_telemetry[1], laser_telemetry[2], laser_telemetry[3]);
 
 	 DOWNLINK_SEND_IR_SENSORS(DefaultChannel, DefaultDevice,
-			&laser_telemetry[0], &laser_telemetry[1], &laser_telemetry[2],&laser_telemetry[3],&l5 );
+			&laser_telemetry[0], &laser_telemetry[1], &laser_telemetry[2],&laser_telemetry[3],&opti_theta );
 }
 
-void wall_avoidance_event(void) {};
+void cx10_laser_emulation_event(void) {};
 //void wall_avoidance_datalink_callback() {};
 
 

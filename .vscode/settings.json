@@ -1,0 +1,10 @@
+{
+    "files.associations": {
+        "radio_control.h": "c",
+        "stdio.h": "c",
+        "messages.h": "c",
+        "cmath": "c",
+        "complex": "c"
+    },
+    "C_Cpp.intelliSenseEngineFallback": "Enabled"
+}

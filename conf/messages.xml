@@ -1952,8 +1952,19 @@
   </message>
 
   <message name="CX_10_TUNING" id="217">
-    <field name="i1" type="float"/>
-    <field name="i2" type="float"/>
+   <field name="total_angle" type="float"/>
+      <field name="Des_dist_left" type="float"/>
+      <field name="Cur_dist_left" type="float"/>
+      <field name="Des_angle_left" type="float"/>
+    <field name="KP_factor_left" type="float"/>
+    <field name="KI_factor_left" type="float"/>
+    <field name="KD_factor_left" type="float"/>
+      <field name="Des_dist_front" type="float"/>
+      <field name="Cur_dist_front" type="float"/>
+      <field name="Des_angle_front" type="float"/>
+    <field name="KP_factor_front" type="float"/>
+    <field name="KI_factor_front" type="float"/>
+    <field name="KD_factor_front" type="float"/>
   </message>
 
 

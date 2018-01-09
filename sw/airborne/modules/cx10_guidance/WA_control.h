@@ -31,11 +31,13 @@
 #include <std.h>
 
 // Settings
-extern float WA_control_pr_ff_gain;  // Pitch/Roll
-extern float WA_control_pr_d_gain;
-extern float WA_control_y_ff_gain;   // Yaw
-extern float WA_control_y_d_gain;
-
+extern float CX10_RANGE; //Laser range
+extern float CX10_desired_dist_left; //PID desired dist
+extern float CX10_desired_dist_front; //PID desired dist
+extern float CX10_desired_dist_right; //PID desired dist
+extern float CX10_KP;
+extern float CX10_KD_before;
+extern float CX10_KI;
 
 // Implement own horizontal guidance module
 #define GUIDANCE_H_MODE_MODULE_SETTING GUIDANCE_H_MODE_MODULE
