@@ -4,7 +4,7 @@
  *
  */
 
-// Using 120 Hertz time constant instead of 520... it's working though
+// Drone doesn't respond as quickly on second corner, need to tune this mode
 #include "state.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,32 +21,29 @@
 #include "../cx10_guidance/WA_control.h"
 
 // Macros
-#define NO_READING 3.0 // Any value above this is a NaN
-#define GUIDANCE_FREQ 512.0 // Using 120 Hz in code with CX10_LASER_EMULATION_PERIODIC_PERIOD
+#define NO_READING 2.4 // Any value above this is considered a NaN
+#define GUIDANCE_FREQ 512.0
 #define TO_RAD_MULTI 0.0174533 // Probably already exists in Papa
 #define CX10_SAFETY_ANGLE (6.0 * TO_RAD_MULTI) // 6.5 degrees is gewd
 #define CX10_MAX_ANGLE (40.0 * TO_RAD_MULTI) // Anything above 35 is dangerous
 #define G 9.81
+#define READING_FILTER_TAU (0.057875)
 
 // Cornering macros
 #define CX10_SAFETY_SPEED ((14.41 * CX10_SAFETY_ANGLE) + 0.4) // Max speed at safety angle from drag estimator
-#define PSI_DOT (M_PI_2 + (20 * TO_RAD_MULTI)) // Max yaw rate
+#define PSI_DOT (M_PI_2 + (30 * TO_RAD_MULTI)) // Max yaw rate
 #define D_PSI_CORNERING (M_PI_2) // Cornering angle
 #define MIN_VEL_ESTIMATE_COUNT 43
-#define PSI_DOT_CORNERING (D_PSI_CORNERING / GUIDANCE_FREQ)
+#define PSI_DOT_CORNERING (D_PSI_CORNERING / GUIDANCE_FREQ) //Yaw increments
+#define YAW_INPUT_DELAY 0.3 // Time taken to yaw
 
-#define DES_DIST (LASER_RANGE - (CX10_SAFETY_SPEED / PSI_DOT)) // Desired distance d from wall during stabilization, optimized for D_PSI_CORNERING yaw rate
-#define R_CORNERING (LASER_RANGE - DES_DIST) // Radius of curvature during cornering
-#define CORNERING_FINAL_COUNT (((D_PSI_CORNERING * R_CORNERING) / CX10_SAFETY_SPEED) * GUIDANCE_FREQ)
+#define DES_DIST 0.7 // Desired distance d from wall during stabilization and cornering
+#define REQUIRED_APPROACH_SPEED (D_PSI_CORNERING * (LASER_RANGE - DES_DIST) / (1 + D_PSI_CORNERING * YAW_INPUT_DELAY))//works but wrong
+#define DECELERATION_PITCH (25 * TO_RAD_MULTI)
+#define R_CORNERING (LASER_RANGE - DES_DIST - 0.3) // Radius of curvature during cornering decrease last term for narrower corner
+#define CORNERING_FINAL_COUNT (D_PSI_CORNERING / PSI_DOT) * GUIDANCE_FREQ //Ticks required to yaw by D_PSI_CORNERING
+
 // Structs
-
-//struct rc_commands_struct {
-//  int rc_x;
-//  int rc_y;
-//  int rc_z;
-//  int rc_t;
-//} rc_commands;
-
 struct cx10_pid_data
 {
 	// Angles in degrees, error in meters
@@ -72,9 +69,9 @@ struct cx10_cornering_state
 	int final_tick_count;
 	bool ctrl_init_flag;
 	bool inited;
-	bool speed_estimation;
-	float first_dist;
-	float initial_speed;
+	// Deceleration phase
+	bool deceleration_phase;
+	int deceleration_ticks;
 };
 
 // Prototypes
@@ -93,6 +90,7 @@ void cx10_cornering(struct cx10_cornering_state*, struct Int32Eulers*, float lef
 int tick_count = 0; // DELETE AFTER YAW TEST
 float desired_heading; // in rad
 bool wall_locked_flag = FALSE;
+bool ctrl_init_flag;
 float cornering_roll;
 float CX10_RANGE = LASER_RANGE;
 int printing_counter = 0;
@@ -100,10 +98,12 @@ int printing_counter = 0;
 float CX10_desired_dist_left = DES_DIST;
 float CX10_desired_dist_front = DES_DIST;
 float CX10_desired_dist_right = 0.0;
-float CX10_KP = 0.55;
+float CX10_KP = 0.24;
 float CX10_KD; // depends on frequency -> initialized in init function
-float CX10_KD_before = 0.15;
-float CX10_KI = 0.004;
+float CX10_KD_before = 0.18;
+float CX10_KI = 0.002;
+float integ_windup_band_error = 0.2; // error when integral term kicks in
+float integ_windup_band_d_error = 0.0003; // differentiated error when integral term kicks in (times freq for vel in m/s)
 
 // Struct inits
 struct cx10_pid_data cx10_pid_left={0.,0.};
@@ -117,7 +117,8 @@ Butterworth2LowPass butter_front_reading;
 Butterworth2LowPass butter_right_reading;
 
 // tau : f_c/ f_s * 2 * pi
-void ctrl_module_init(struct cx10_pid_data* pid_left, struct cx10_pid_data* pid_front, struct cx10_pid_data* pid_right)
+void ctrl_module_init(struct cx10_pid_data* pid_left, struct cx10_pid_data* pid_front,
+		struct cx10_pid_data* pid_right)
 {
 //	rc_commands.rc_x = 0.;
 //	rc_commands.rc_y = 0.;
@@ -127,14 +128,20 @@ void ctrl_module_init(struct cx10_pid_data* pid_left, struct cx10_pid_data* pid_
 	desired_heading = stateGetNedToBodyEulers_f() -> psi; //heading
 	CX10_KD = CX10_KD_before * GUIDANCE_FREQ; // Times frequency
 	// Filter: tau =  0.2617 works good
-	float front_distance = LASER_RANGE / cos(stateGetNedToBodyEulers_f()-> theta);
-	float side_distance = LASER_RANGE / cos(stateGetNedToBodyEulers_f()-> phi);
-	init_butterworth_2_low_pass(&butter_left_reading, 2*0.2617,
-			CX10_LASER_EMULATION_PERIODIC_PERIOD, side_distance);
-	init_butterworth_2_low_pass(&butter_front_reading, 2*0.2617,
-			CX10_LASER_EMULATION_PERIODIC_PERIOD, front_distance);
-	init_butterworth_2_low_pass(&butter_right_reading, 2*0.2617,
-			CX10_LASER_EMULATION_PERIODIC_PERIOD, side_distance);
+
+	float left_init_reading = laser_telemetry[0] > LASER_RANGE ? LASER_RANGE : laser_telemetry[0];
+	float front_init_reading = laser_telemetry[1] > LASER_RANGE ? LASER_RANGE : laser_telemetry[1];
+	float right_init_reading = laser_telemetry[2] > LASER_RANGE ? LASER_RANGE : laser_telemetry[2];
+
+	float left_init_distance = left_init_reading * cos(stateGetNedToBodyEulers_f()-> phi);
+	float front_init_distance = front_init_reading * cos(stateGetNedToBodyEulers_f()-> theta);
+	float right_init_distance = right_init_reading * cos(stateGetNedToBodyEulers_f()-> phi);
+	init_butterworth_2_low_pass(&butter_left_reading, READING_FILTER_TAU,
+			1 / GUIDANCE_FREQ, left_init_distance);
+	init_butterworth_2_low_pass(&butter_front_reading, READING_FILTER_TAU,
+			1 / GUIDANCE_FREQ, front_init_distance);
+	init_butterworth_2_low_pass(&butter_right_reading, READING_FILTER_TAU,
+			1 / GUIDANCE_FREQ, right_init_distance);
 	pid_left->wall_locked_flag = FALSE;
 	pid_front->wall_locked_flag = FALSE;
 	pid_right->wall_locked_flag = FALSE;
@@ -152,8 +159,8 @@ void ctrl_module_init(struct cx10_pid_data* pid_left, struct cx10_pid_data* pid_
 void ctrl_module_run(bool in_flight, struct Int32Eulers* commands, float left_reading, float front_reading, float right_reading)
 // Takes laser readings as input and will stabilize/'hover' drone certain distance from wall saving its outputs into sp_cmd_i
 {
-	float front_distance = front_reading / cos(stateGetNedToBodyEulers_f()-> theta);
-	float left_distance = left_reading / cos(stateGetNedToBodyEulers_f()-> phi);
+	float front_distance = front_reading * cos(stateGetNedToBodyEulers_f()-> theta);
+	float left_distance = left_reading * cos(stateGetNedToBodyEulers_f()-> phi);
 
 	float desired_pitch = 0;//pid_cx10(front_reading, CX10_desired_dist_front, front_distance,
 			//&cx10_pid_front, &butter_front_reading);
@@ -215,43 +222,57 @@ void guidance_h_module_run(bool in_flight)
 	float left_reading = laser_telemetry[0];
 	float front_reading = laser_telemetry[1];
 	float right_reading = laser_telemetry[2];
-	if(printing_counter % 100 == 0)
-	{
-		printf("lock: %i, front: %f, left: %f, cornering_state: %i\n", wall_locked_flag, front_reading, left_reading, cornering_state.inited);
-	}
     if((wall_locked_flag == TRUE) && (front_reading < NO_READING) && (cornering_state.inited == FALSE))
     {
+    	ctrl_init_flag = FALSE;
     	cx10_cornering_init(FALSE, &cornering_state, front_reading);
-    	if(printing_counter % 100 == 0){printf("corner inited\n");}
+    	//printf("corner inited\n");
     }
     if(cornering_state.inited == TRUE)
     {
+    	ctrl_init_flag = FALSE;
     	cx10_cornering(&cornering_state, &sp_cmd_i, left_reading, front_reading, right_reading);
-    	if(printing_counter % 100 == 0){printf("Cornering\n");}
+    	if(printing_counter % 20 == 0){//printf("Cornering\n");
+    	}
     }
 
     else // if wallLockedFlag == False and front_reading >= NO_READING:
     {
-    	ctrl_module_run(in_flight, &sp_cmd_i, left_reading, front_reading, right_reading);
-
-    	if(wall_locked_flag)
+    	if(ctrl_init_flag == FALSE)
     	{
-    		sp_cmd_i.theta = ANGLE_BFP_OF_REAL(- CX10_SAFETY_ANGLE);  // pitch
+        	ctrl_init_flag = TRUE;
+        	guidance_h_module_init();
+
     	}
-    	if(printing_counter % 100 == 0){printf("Controlling\n");}
+
+    	ctrl_module_run(in_flight, &sp_cmd_i, left_reading, front_reading, right_reading);
+    	if(printing_counter % 20 == 0)
+    	{
+    		//printf("controlling-> lock: %i, front: %f, left: %f, cornering_state: %i\n", wall_locked_flag, front_reading, left_reading, cornering_state.inited);
+    	}
+    	if(wall_locked_flag)
+    	{ // When locked on, pitch forward, if imu_theta greater than safety, decrease pitch amount
+    		float cruising_pitch = - CX10_SAFETY_ANGLE;
+    		if(stateGetNedToBodyEulers_f() -> theta < - CX10_SAFETY_ANGLE)
+    		{
+    			cruising_pitch += 5 * TO_RAD_MULTI;
+    			printf("cruising pitch desired: %f, actual: %f\n", cruising_pitch / TO_RAD_MULTI, stateGetNedToBodyEulers_f() -> theta / TO_RAD_MULTI);
+    		}
+    		sp_cmd_i.theta = ANGLE_BFP_OF_REAL(cruising_pitch);  // pitch
+    	}
     }
-    if(front_reading < 0.3) // in case of emergency?
-    {
-    	cx10_cornering_init(TRUE, &cornering_state, 0);
-    	wall_locked_flag = FALSE;
-    	printf("front < 0.3 -> collision avoidance... front_reading = %f\n", front_reading);
-    	sp_cmd_i.theta = ANGLE_BFP_OF_REAL(pid_cx10(front_reading, CX10_desired_dist_front,
-    			front_reading / (cos(stateGetNedToBodyEulers_f()-> theta)), &cx10_pid_front,
-    					&butter_front_reading));
-    	sp_cmd_i.phi = ANGLE_BFP_OF_REAL(pid_cx10(left_reading, CX10_desired_dist_left,
-    			left_reading / (cos(stateGetNedToBodyEulers_f()-> phi)), &cx10_pid_left,
-    					&butter_left_reading));
-    }
+//    if(front_reading < 0.3) // in case of emergency?
+//    {
+//    	cx10_cornering_init(TRUE, &cornering_state, 0);
+//    	wall_locked_flag = FALSE;
+//    	printf("front < 0.3 -> collision avoidance... front_reading = %f\n", front_reading);
+//    	sp_cmd_i.theta = ANGLE_BFP_OF_REAL(pid_cx10(front_reading, CX10_desired_dist_front,
+//    			front_reading / (cos(stateGetNedToBodyEulers_f()-> theta)), &cx10_pid_front,
+//    					&butter_front_reading));
+//    	sp_cmd_i.phi = ANGLE_BFP_OF_REAL(pid_cx10(left_reading, CX10_desired_dist_left,
+//    			left_reading / (cos(stateGetNedToBodyEulers_f()-> phi)), &cx10_pid_left,
+//    					&butter_left_reading));
+//    }
     stabilization_attitude_set_rpy_setpoint_i(&sp_cmd_i);
     stabilization_attitude_run(in_flight);
     if(printing_counter >= 100){printing_counter = 0;}
@@ -288,7 +309,7 @@ float pid_cx10(float reading, float desired_distance, float current_distance, st
 		pid_data->last = filtered_current_distance;
 		float pid_error = desired_distance - current_distance;
 		// Lock info for navigation
-		if(fabs(pid_error) < 0.15 && fabs(d_input) < 0.001)
+		if(fabs(pid_error) < integ_windup_band_error && fabs(d_input) < integ_windup_band_d_error)
 		{
 			pid_data->wall_locked_flag = TRUE;
 		}
@@ -301,31 +322,23 @@ float pid_cx10(float reading, float desired_distance, float current_distance, st
 		KP_factor = CX10_KP * pid_error;
 
 		// Non-linear behavior, need to compact when done with logic
-		if(d_input > 0.0) // when approaching wall
+		if((d_input > 0.0) && (pid_error < 0.0)) // when approaching wall before passing desired distance
 		{
-			if(pid_error < 0.0) // before passing desired distance
+			KP_factor *= 0.7; // Doesn't fly towards wall as fast on initial approach
+			KD_factor *= 1.3; // More breaking when approaching wall, before passing desired distance
+			if(KP_factor < - CX10_SAFETY_ANGLE)
 			{
-				KP_factor *= 0.5; // Doesn't fly towards wall as fast on initial approach
-				KD_factor *= 1.5; // More breaking when approaching wall, before passing desired distance
-// 12/12 remove comment after checked				if(KP_factor < - CX10_SAFETY_ANGLE)
-//				{
-//					KP_factor = - CX10_SAFETY_ANGLE; // when approaching wall, before passing desired distance
-//				}
-			}
-			if(pid_error > 0.0) // after passing desired distance
-			{
-				KP_factor *= 1.5; // rebound from wall after passing desired distance
-				//printf("rebound from wall after passing desired distance");
+				KP_factor = - CX10_SAFETY_ANGLE; // when approaching wall, before passing desired distance
 			}
 		}
-		if((d_input < 0.0) && (pid_error < 0.0)){
-			KP_factor *= 0.5; // Rebounding from wall, after passing desired distance
-			KD_factor *= 0.5;
+		if((d_input < 0.0) && (pid_error < 0.0)) // after wall rebound after passing desired distance
+		{
+			KD_factor *= 0.7; // Assuming drone has stabilized at this point
 			//printf("Rebounding from wall, after passing desired distance");
 		}
 
 		desired_angle = KP_factor + KD_factor;
-		if(fabs(pid_error) < 0.05)
+		if((fabs(pid_error) < integ_windup_band_error) && fabs(d_input) < integ_windup_band_d_error)
 		{
 			pid_data->pid_error_sum += pid_error;
 			KI_factor = CX10_KI * pid_data->pid_error_sum;
@@ -391,13 +404,23 @@ void cx10_cornering_init(bool reset_state, struct cx10_cornering_state* cornerin
 		cornering->final_heading = initial_heading + D_PSI_CORNERING;
 		cornering->tick_count = 0;
 		cornering->final_tick_count = CORNERING_FINAL_COUNT;
-		cornering->initial_speed = CX10_SAFETY_SPEED;
-		cornering->desired_roll = atan(powf(CX10_SAFETY_SPEED, 2) / (G * (LASER_RANGE - DES_DIST)));
-		cornering->desired_pitch = 0;//- (CX10_SAFETY_ANGLE / 2);
-		cornering->speed_estimation = TRUE;
-		cornering->first_dist = front_reading / cos(stateGetNedToBodyEulers_f()-> theta);
 
-		printf("cornering final count: %f\nRadius: %f\nDesired distance: %f\n", CORNERING_FINAL_COUNT, R_CORNERING, DES_DIST);
+		//Deceleration phase:
+		cornering->deceleration_phase = TRUE;
+		cornering->desired_roll = atan(powf(REQUIRED_APPROACH_SPEED, 2) / (G * R_CORNERING));;
+		cornering->desired_pitch = DECELERATION_PITCH;
+		cornering->deceleration_ticks = round(GUIDANCE_FREQ * (CX10_SAFETY_SPEED - REQUIRED_APPROACH_SPEED) / (G * tan(DECELERATION_PITCH)));
+//		printf("Cornering deceleration ticks: %i,\nR_cornering: %f\n, final speed: %f\n cornering roll: %f\n",
+//				cornering->deceleration_ticks, R_CORNERING, REQUIRED_APPROACH_SPEED,
+//				cornering->desired_roll / TO_RAD_MULTI);
+//		printf("\n\ninit cornering state heading: %f\n", stateGetNedToBodyEulers_f() -> psi);
+//		//Speed estimation:
+//		cornering->speed_estimation = TRUE;
+//		cornering->initial_speed = CX10_SAFETY_SPEED;
+//		cornering->desired_roll = atan(powf(CX10_SAFETY_SPEED, 2) / (G * (LASER_RANGE - DES_DIST)));
+//		cornering->desired_pitch = 0;//- (CX10_SAFETY_ANGLE / 2);
+//		cornering->first_dist = front_reading * cos(stateGetNedToBodyEulers_f()-> theta);
+//		printf("cornering final count: %f\nRadius: %f\nDesired distance: %f\n", CORNERING_FINAL_COUNT, R_CORNERING, DES_DIST);
 	}
 }
 
@@ -407,25 +430,34 @@ void cx10_cornering(struct cx10_cornering_state* cornering, struct Int32Eulers* 
 {
 	float current_heading = stateGetNedToBodyEulers_f() -> psi;
 	float heading_error = heading_mod_2pi(GetHeadingError(current_heading, cornering->final_heading));
+	//printf("ticks: %i\n", cornering->tick_count);
 
-	if(cornering->speed_estimation == TRUE)
+	if(cornering->deceleration_phase)
 	{
-		if(cornering->tick_count > MIN_VEL_ESTIMATE_COUNT && front_reading < NO_READING)
+		if(cornering->tick_count > cornering->deceleration_ticks)
 		{
-			cornering->speed_estimation = FALSE;
-			cornering->initial_speed = (cornering->first_dist - front_reading/ cos(stateGetNedToBodyEulers_f()-> theta)) / cornering->tick_count * GUIDANCE_FREQ;
-			cornering->desired_roll = atan(powf(cornering->initial_speed, 2) / (G * (LASER_RANGE - DES_DIST)));
+			//printf("braking done, now cornering\n");
+			cornering->deceleration_phase = FALSE;
 			cornering->desired_heading += (PSI_DOT / GUIDANCE_FREQ);
-			cornering->desired_pitch = CX10_SAFETY_ANGLE / 2; // should be pitching down... this way it brakes!
-			printf("After measuring: first reading: %f, last reading: %f, tick_count: %i, phi: %f, initial corner speed: %f\n", cornering->first_dist,
-					front_reading, cornering->tick_count, cornering->desired_roll / TO_RAD_MULTI, cornering->initial_speed);
-
+			cornering->desired_pitch = 0;//- CX10_SAFETY_ANGLE / 2; // should be pitching down... this way it brakes!
 		}
+
+//	if(cornering->speed_estimation)
+//	{
+//		if(cornering->tick_count > MIN_VEL_ESTIMATE_COUNT && front_reading < NO_READING)
+//		{
+//			cornering->speed_estimation = FALSE;
+//			cornering->initial_speed = (cornering->first_dist - front_reading/ cos(stateGetNedToBodyEulers_f()-> theta)) / cornering->tick_count * GUIDANCE_FREQ;
+//			cornering->desired_roll = atan(powf(cornering->initial_speed, 2) / (G * (LASER_RANGE - DES_DIST)));
+//			cornering->desired_heading += (PSI_DOT / GUIDANCE_FREQ);
+//			cornering->desired_pitch = CX10_SAFETY_ANGLE / 2; // should be pitching down... this way it brakes!
+//			printf("After measuring: first reading: %f, last reading: %f, tick_count: %i, phi: %f, initial corner speed: %f\n", cornering->first_dist,
+//					front_reading, cornering->tick_count, cornering->desired_roll / TO_RAD_MULTI, cornering->initial_speed);
+//
+//		}
 		else
 		{
 			cornering->desired_heading += (PSI_DOT / GUIDANCE_FREQ);
-			printf("Before measuring: first reading: %f, last reading: %f, tick_count: %i, phi: %f, initial corner speed: %f\n", cornering->first_dist,
-								front_reading, cornering->tick_count, cornering->desired_roll / TO_RAD_MULTI, cornering->initial_speed);
 		}
 		commands->psi = ANGLE_BFP_OF_REAL(cornering->desired_heading);
 		commands->theta = ANGLE_BFP_OF_REAL(cornering->desired_pitch); // pitch
@@ -444,21 +476,26 @@ void cx10_cornering(struct cx10_cornering_state* cornering, struct Int32Eulers* 
 			}
 			else
 			{
-				if(cornering->ctrl_init_flag == FALSE)
-					{
-						ctrl_module_init(&cx10_pid_left, &cx10_pid_front, &cx10_pid_right);
-						desired_heading = cornering->desired_heading; //bypass init function's heading set
-						cornering->ctrl_init_flag = TRUE;
-					}
-				ctrl_module_run(TRUE, commands, left_reading, front_reading, right_reading);
-			}
+				commands->theta = ANGLE_BFP_OF_REAL(cornering->desired_pitch); // pitch
+								commands->phi = ANGLE_BFP_OF_REAL(cornering->desired_roll);
+								commands->psi = ANGLE_BFP_OF_REAL(cornering->desired_heading); // Test whether you need to input it during every loop
+//				if(cornering->ctrl_init_flag == FALSE)
+//					{
+//						ctrl_module_init(&cx10_pid_left, &cx10_pid_front, &cx10_pid_right);
+//						desired_heading = cornering->desired_heading; //bypass init function's heading set
+//						cornering->ctrl_init_flag = TRUE;
+//					}
+//				ctrl_module_run(TRUE, commands, left_reading, front_reading, right_reading);
+				}
 		}
 		else
 		{
 			cornering->inited = FALSE;
+			//printf("\n\n\n\n\nDONE TURNING\n\n\n\n");
 		}
 	}
 	cornering->tick_count += 1;
+	//printf("cornering state heading: %i, actual heading: %f\n", commands->psi, stateGetNedToBodyEulers_f() -> psi);
 }
 
 float max_angle_limiting_factor(float des_pitch, float des_roll)

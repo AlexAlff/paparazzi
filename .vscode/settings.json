@@ -4,7 +4,26 @@
         "stdio.h": "c",
         "messages.h": "c",
         "cmath": "c",
-        "complex": "c"
+        "complex": "c",
+        "math.h": "c",
+        "modules.h": "c",
+        "stabilization.h": "c",
+        "file_logger.h": "c",
+        "*.tcc": "c",
+        "cx10_laser_emulation.h": "c",
+        "typeinfo": "c",
+        "stabilization_attitude.h": "c",
+        "stdlib.h": "c",
+        "system_error": "c",
+        "downlink.h": "c",
+        "helpers.h": "c",
+        "low_pass_filter.h": "c",
+        "uart.h": "c",
+        "state.h": "c",
+        "wa_control.h": "c",
+        "cx10_pid.h": "c",
+        "pprz_algebra_int.h": "c",
+        "safe_mode.h": "c"
     },
     "C_Cpp.intelliSenseEngineFallback": "Enabled"
 }

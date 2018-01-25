@@ -28,14 +28,13 @@
 
 #include <stdio.h>
 #include "std.h"
-
 #include "subsystems/imu.h"
 #include "firmwares/rotorcraft/stabilization.h"
 #include "state.h"
 
 /** Set the default File logger path to the USB drive */
 #ifndef FILE_LOGGER_PATH
-#define FILE_LOGGER_PATH /data/video/usb
+#define FILE_LOGGER_PATH /data/video/logs
 #endif
 
 /** The file pointer */

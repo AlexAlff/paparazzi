@@ -65,6 +65,8 @@
      <field name="laser_forward" type="float" format="%.2f" unit = "m"/>
      <field name="laser_right" type="float" format="%.2f" unit = "m"/>
      <field name="laser_up" type="float" format="%.2f" unit = "m"/>
+     <field name="x" type="float" format="%.2f" unit="m"/>
+     <field name="y" type="float" format="%.2f" unit="m"/>
      <field name="aux" type="float" format="%.2f" unit = "m"/>
    </message>
 
